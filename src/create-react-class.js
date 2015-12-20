@@ -37,11 +37,9 @@ function createReactClass(React, Adapter) {
     return eventObservables;
   }
 
-  return function component(
-    displayName,
-    definitionFn,
-    componentOptions
-  ) {
+  return function component(displayName,
+                            definitionFn,
+                            componentOptions) {
     if (typeof displayName !== 'string') {
       throw new Error('Invalid displayName');
     }
@@ -75,16 +73,17 @@ function createReactClass(React, Adapter) {
         this.cycleComponentDispose = cycleComponent.dispose;
         this.onMount = cycleComponent.onMount;
         this._renderedVtree = null;
-        this._rendering = false;
         var vtree$ = cycleComponent.vtree$;
 
         var schedulerReadySubscription = subscribe(this.scheduler.scheduledReadySubject,
           function onHasScheduled(id) {
-            self.setState({lastScheduledId: id});
+            if (!self.__rendering___) {
+              self.setState({lastScheduledId: id});
+            }
           });
 
         var subscription = subscribe(vtree$, function onNextVTree(vtree) {
-          if (self._rendering) {
+          if (self.__rendering___) {
             self._renderedVtree = vtree;
           } else {
             self.setState({vtree: vtree});
@@ -159,16 +158,21 @@ function createReactClass(React, Adapter) {
         var vtree = this.state ? this.state.vtree : null;
         if (this.scheduler && this.scheduler.hasNew) {
           this._renderedVtree = null;
-          this._rendering = true;
-          this.scheduler.runScheduled();
-          vtree = this._renderedVtree;
+          this.__rendering___ = true;
+          try {
+            this.scheduler.runScheduled();
+            if (this._renderedVtree) {
+              vtree = this._renderedVtree
+            }
+          } finally {
+            this.__rendering___ = false;
+          }
         }
 
         if (this.state && vtree) {
           // TODO: Remove this block in the future releases
           if (typeof vtree === 'function' &&
-              typeof console !== 'undefined')
-          {
+            typeof console !== 'undefined') {
             console.warn(
               'Support for using the function as view is ' +
               'deprecated and will be soon removed.'
@@ -178,6 +182,7 @@ function createReactClass(React, Adapter) {
           return React.cloneElement(vtree);
         }
         return React.createElement(rootTagName);
+
       }
     };
 
@@ -189,8 +194,7 @@ function createReactClass(React, Adapter) {
     }
     // Override forceUpdate for react-hot-loader
     if (options._testForceHotLoader ||
-      (!options.disableHotLoader && module.hot))
-    {
+      (!options.disableHotLoader && module.hot)) {
       reactClassProto.forceUpdate = function hotForceUpdate(callback) {
         if (this.hasMounted) {
           this._unsubscribeCycleComponent();
